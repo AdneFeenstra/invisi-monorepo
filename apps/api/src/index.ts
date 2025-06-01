@@ -24,6 +24,20 @@ app.get("/invoices", async (_req, res) => {
   }
 });
 
+app.get("/time-entries", async (_req, res) => {
+  try {
+    const entries = await prisma.timeEntry.findMany({
+      include: {
+        invoice: true, // ✅ ook factuurinfo ophalen
+      },
+    });
+    res.json(entries);
+  } catch (error) {
+    console.error("Error fetching time entries:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
 app.listen(port, () => {
   console.log(`🟢 API server listening on http://localhost:${port}`);
 });

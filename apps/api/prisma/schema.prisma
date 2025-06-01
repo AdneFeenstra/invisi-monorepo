@@ -14,10 +14,24 @@ datasource db {
 }
 
 model Invoice {
-  id        String   @id @default(cuid())
+  id        String      @id @default(cuid())
   client    String
-  amount    Int
+  amount    Float
   status    String
-  createdAt DateTime @default(now())
+  createdAt DateTime    @default(now())
+
+  timeEntries TimeEntry[] // ✅ Relation added
+}
+
+
+model TimeEntry {
+  id          String    @id @default(cuid())
+  description String
+  duration    Float     // in uren
+  date        DateTime
+  invoice     Invoice?  @relation(fields: [invoiceId], references: [id])
+  invoiceId   String?
+
+  createdAt   DateTime  @default(now())
 }
 
