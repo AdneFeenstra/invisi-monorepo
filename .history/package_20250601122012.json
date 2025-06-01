@@ -1,0 +1,13 @@
+{
+  "name": "invisi-monorepo",
+  "private": true,
+  "version": "1.0.0",
+  "packageManager": "pnpm@10.11.0",
+  "devDependencies": {
+    "turbo": "^2.5.4"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
+}
