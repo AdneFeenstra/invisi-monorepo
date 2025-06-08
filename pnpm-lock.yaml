@@ -35,6 +35,9 @@ importers:
       prisma:
         specifier: ^6.8.2
         version: 6.9.0(typescript@5.8.3)
+      qs:
+        specifier: ^6.14.0
+        version: 6.14.0
     devDependencies:
       '@types/cors':
         specifier: ^2.8.18
@@ -45,6 +48,9 @@ importers:
       '@types/node':
         specifier: ^20.17.57
         version: 20.19.0
+      '@types/qs':
+        specifier: ^6.14.0
+        version: 6.14.0
       ts-node:
         specifier: ^10.9.2
         version: 10.9.2(@types/node@20.19.0)(typescript@5.8.3)
@@ -2181,6 +2187,10 @@ packages:
 
   qs@6.11.0:
     resolution: {integrity: sha512-MvjoMCJwEarSbUYk5O+nmoSzSutSsTwF85zcHPQ9OrlFoZOYIjaqBAJIqIXjptyD5vThxGq52Xu/MaJzRkIk4Q==}
+    engines: {node: '>=0.6'}
+
+  qs@6.14.0:
+    resolution: {integrity: sha512-YWWTjgABSKcvs/nWBi9PycY/JiPJqOD4JA6o9Sej2AtvSGarXxKC3OQSk4pAarbdQlKAh5D4FCQkJNkW+GAn3w==}
     engines: {node: '>=0.6'}
 
   queue-microtask@1.2.3:
@@ -4813,6 +4823,10 @@ snapshots:
   punycode@2.3.1: {}
 
   qs@6.11.0:
+    dependencies:
+      side-channel: 1.1.0
+
+  qs@6.14.0:
     dependencies:
       side-channel: 1.1.0
 

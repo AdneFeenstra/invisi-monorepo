@@ -5,6 +5,8 @@ import { clerkClient, getAuth } from "@clerk/express";
 import { clerkMiddleware } from "@clerk/express";
 import { requireAuth } from "@clerk/express";
 import axios from "axios";
+import { AxiosError } from "axios";
+import qs from "qs";
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -327,6 +329,344 @@ app.get("/harvest/callback", async (req, res) => {
   } catch (err: any) {
     console.error("OAuth callback error", err.response?.data || err.message);
     res.status(500).json({ error: "Failed to exchange token" });
+  }
+});
+
+app.get("/harvest/time-entries", requireAuth(), async (req, res) => {
+  const auth = getAuth(req);
+  if (!auth.userId) return res.status(401).json({ error: "Unauthorized" });
+
+  const connection = await prisma.harvestConnection.findUnique({
+    where: { userId: auth.userId },
+  });
+
+  if (!connection) {
+    return res.status(404).json({ error: "No Harvest connection found" });
+  }
+
+  try {
+    const response = await axios.get(
+      "https://api.harvestapp.com/v2/time_entries",
+      {
+        headers: {
+          Authorization: `Bearer ${connection.accessToken}`,
+          "Harvest-Account-Id": process.env.HARVEST_ACCOUNT_ID!,
+          "User-Agent": "InvisiBilled (you@example.com)", // <- optioneel
+        },
+      }
+    );
+
+    res.json(response.data);
+  } catch (err) {
+    const error = err as AxiosError;
+    console.error(
+      "Failed to fetch Harvest time entries:",
+      error.response?.data || error.message
+    );
+    res.status(500).json({ error: "Failed to fetch time entries" });
+  }
+});
+
+app.get("/harvest/me", requireAuth(), async (req, res) => {
+  const auth = getAuth(req);
+  if (!auth.userId) return res.status(401).json({ error: "Unauthorized" });
+
+  const connection = await prisma.harvestConnection.findUnique({
+    where: { userId: auth.userId },
+  });
+
+  if (!connection) {
+    return res.status(404).json({ error: "No Harvest connection found" });
+  }
+
+  try {
+    const response = await axios.get("https://api.harvestapp.com/v2/users/me", {
+      headers: {
+        Authorization: `Bearer ${connection.accessToken}`,
+        "Harvest-Account-Id": process.env.HARVEST_ACCOUNT_ID!,
+        "User-Agent": "InvisiBilled (you@example.com)",
+      },
+    });
+
+    res.json(response.data);
+  } catch (err) {
+    const error = err as AxiosError;
+    console.error("Failed to fetch Harvest user info:", err);
+    res.status(500).json({ error: "Failed to fetch user info" });
+  }
+});
+
+app.get("/clickup/connect", requireAuth(), (req, res) => {
+  const clientId = process.env.CLICKUP_CLIENT_ID!;
+  const redirectUri = process.env.CLICKUP_REDIRECT_URI!;
+  const authUrl = `https://app.clickup.com/api?client_id=${clientId}&redirect_uri=${encodeURIComponent(
+    redirectUri
+  )}`;
+  res.redirect(authUrl);
+});
+
+app.get("/clickup/callback", async (req, res) => {
+  const { code } = req.query;
+  if (!code) return res.status(400).send("Missing code");
+
+  try {
+    const tokenRes = await axios.post(
+      "https://api.clickup.com/api/v2/oauth/token",
+      {
+        client_id: process.env.CLICKUP_CLIENT_ID,
+        client_secret: process.env.CLICKUP_CLIENT_SECRET,
+        code,
+        redirect_uri: process.env.CLICKUP_REDIRECT_URI,
+      }
+    );
+
+    const auth = getAuth(req);
+    if (!auth.userId) return res.status(401).json({ error: "Unauthorized" });
+
+    const { access_token, token_type } = tokenRes.data;
+
+    // Optioneel: workspace ophalen
+    const workspaceRes = await axios.get(
+      "https://api.clickup.com/api/v2/team",
+      {
+        headers: { Authorization: access_token },
+      }
+    );
+
+    const team = workspaceRes.data.teams?.[0];
+
+    await prisma.clickUpConnection.upsert({
+      where: { userId: auth.userId },
+      create: {
+        userId: auth.userId,
+        accessToken: access_token,
+        tokenType: token_type,
+        workspaceId: team?.id || "",
+        workspaceName: team?.name || "",
+      },
+      update: {
+        accessToken: access_token,
+        tokenType: token_type,
+        workspaceId: team?.id || "",
+        workspaceName: team?.name || "",
+      },
+    });
+
+    res.redirect("http://localhost:5173");
+  } catch (err) {
+    const error = err as AxiosError;
+    console.error("ClickUp OAuth error", error.response?.data || error.message);
+    res.status(500).json({ error: "Failed to exchange token" });
+  }
+});
+
+app.get("/clickup/tasks", requireAuth(), async (req, res) => {
+  const auth = getAuth(req);
+  if (!auth.userId) return res.status(401).json({ error: "Unauthorized" });
+
+  const connection = await prisma.clickUpConnection.findUnique({
+    where: { userId: auth.userId },
+  });
+
+  if (!connection) {
+    return res.status(404).json({ error: "No ClickUp connection found" });
+  }
+
+  try {
+    const response = await axios.get(
+      `https://api.clickup.com/api/v2/team/${connection.workspaceId}/task`,
+      {
+        headers: {
+          Authorization: connection.accessToken,
+        },
+      }
+    );
+
+    res.json(response.data);
+  } catch (err) {
+    const error = err as AxiosError;
+    console.error(
+      "Failed to fetch ClickUp tasks:",
+      error.response?.data || error.message
+    );
+    res.status(500).json({ error: "Failed to fetch ClickUp tasks" });
+  }
+});
+
+app.get("/clickup/me", requireAuth(), async (req, res) => {
+  const auth = getAuth(req);
+  if (!auth.userId) return res.status(401).json({ error: "Unauthorized" });
+
+  const connection = await prisma.clickUpConnection.findUnique({
+    where: { userId: auth.userId },
+  });
+
+  if (!connection) {
+    return res.status(404).json({ error: "No ClickUp connection found" });
+  }
+
+  try {
+    const response = await axios.get("https://api.clickup.com/api/v2/user", {
+      headers: {
+        Authorization: connection.accessToken,
+      },
+    });
+
+    res.json(response.data);
+  } catch (err) {
+    const error = err as AxiosError;
+    console.error(
+      "Failed to fetch ClickUp user info:",
+      error.response?.data || error.message
+    );
+    res.status(500).json({ error: "Failed to fetch user info" });
+  }
+});
+
+// QuickBooks connect endpoint
+app.get("/quickbooks/connect", requireAuth(), (req, res) => {
+  const baseUrl = "https://appcenter.intuit.com/connect/oauth2";
+  const clientId = process.env.QB_CLIENT_ID!;
+  const redirectUri = process.env.QB_REDIRECT_URI!;
+  const scope = "com.intuit.quickbooks.accounting openid profile email";
+
+  const url = `${baseUrl}?client_id=${clientId}&redirect_uri=${encodeURIComponent(
+    redirectUri
+  )}&response_type=code&scope=${encodeURIComponent(scope)}`;
+
+  res.redirect(url);
+});
+
+// QuickBooks callback
+app.get("/quickbooks/callback", async (req, res) => {
+  const { code, realmId } = req.query;
+
+  if (!code || !realmId) {
+    return res.status(400).json({ error: "Missing code or realmId" });
+  }
+
+  try {
+    const response = await axios.post(
+      "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer",
+      qs.stringify({
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: process.env.QUICKBOOKS_REDIRECT_URI,
+      }),
+      {
+        headers: {
+          Authorization:
+            "Basic " +
+            Buffer.from(
+              `${process.env.QUICKBOOKS_CLIENT_ID}:${process.env.QUICKBOOKS_CLIENT_SECRET}`
+            ).toString("base64"),
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+      }
+    );
+
+    const auth = getAuth(req);
+    if (!auth.userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const { access_token, refresh_token, expires_in } = response.data;
+
+    await prisma.quickBooksConnection.upsert({
+      where: { userId: auth.userId },
+      create: {
+        userId: auth.userId,
+        accessToken: access_token,
+        refreshToken: refresh_token,
+        expiresAt: new Date(Date.now() + expires_in * 1000),
+        realmId: realmId as string,
+      },
+      update: {
+        accessToken: access_token,
+        refreshToken: refresh_token,
+        expiresAt: new Date(Date.now() + expires_in * 1000),
+        realmId: realmId as string,
+      },
+    });
+
+    res.redirect("http://localhost:5173"); // terug naar de UI
+  } catch (err) {
+    const error = err as AxiosError;
+    console.error(
+      "QuickBooks callback error",
+      error.response?.data || error.message
+    );
+    res.status(500).json({ error: "Failed to exchange token with QuickBooks" });
+  }
+});
+
+app.get("/quickbooks/customers", requireAuth(), async (req, res) => {
+  const auth = getAuth(req);
+  if (!auth.userId) return res.status(401).json({ error: "Unauthorized" });
+  const conn = await prisma.quickBooksConnection.findUnique({
+    where: { userId: auth.userId },
+  });
+
+  if (!conn)
+    return res.status(404).json({ error: "No QuickBooks connection found" });
+
+  try {
+    const response = await axios.get(
+      `https://sandbox-quickbooks.api.intuit.com/v3/company/${conn.realmId}/query`,
+      {
+        headers: {
+          Authorization: `Bearer ${conn.accessToken}`,
+          Accept: "application/json",
+        },
+        params: {
+          query: "SELECT * FROM Customer",
+        },
+      }
+    );
+
+    res.json(response.data.QueryResponse.Customer || []);
+  } catch (err) {
+    const error = err as AxiosError;
+    console.error(
+      "Error fetching customers:",
+      error.response?.data || error.message
+    );
+    res.status(500).json({ error: "Failed to fetch customers" });
+  }
+});
+
+app.get("/quickbooks/invoices", requireAuth(), async (req, res) => {
+  const auth = getAuth(req);
+  if (!auth.userId) return res.status(401).json({ error: "Unauthorized" });
+  const conn = await prisma.quickBooksConnection.findUnique({
+    where: { userId: auth.userId },
+  });
+
+  if (!conn)
+    return res.status(404).json({ error: "No QuickBooks connection found" });
+
+  try {
+    const response = await axios.get(
+      `https://sandbox-quickbooks.api.intuit.com/v3/company/${conn.realmId}/query`,
+      {
+        headers: {
+          Authorization: `Bearer ${conn.accessToken}`,
+          Accept: "application/json",
+        },
+        params: {
+          query: "SELECT * FROM Invoice",
+        },
+      }
+    );
+
+    res.json(response.data.QueryResponse.Invoice || []);
+  } catch (err) {
+    const error = err as AxiosError;
+    console.error(
+      "Error fetching invoices:",
+      error.response?.data || error.message
+    );
+    res.status(500).json({ error: "Failed to fetch invoices" });
   }
 });
 

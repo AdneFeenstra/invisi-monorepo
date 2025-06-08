@@ -58,3 +58,32 @@ model HarvestConnection {
   createdAt   DateTime @default(now())
 }
 
+model ClickUpConnection {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  accessToken   String
+  tokenType     String
+  workspaceId   String
+  workspaceName String
+  createdAt     DateTime @default(now())
+}
+
+model QuickBooksConnection {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  accessToken  String
+  refreshToken String
+  expiresAt    DateTime
+  realmId      String   // ✅ deze moet erin
+  createdAt    DateTime @default(now())
+}
+
+
+model SlackConnection {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  accessToken  String
+  botUserId    String
+}
+
+
