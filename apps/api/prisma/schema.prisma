@@ -47,3 +47,14 @@ model HarvestLog {
   createdAt   DateTime @default(now())
 }
 
+model HarvestConnection {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  accessToken String
+  refreshToken String
+  expiresAt   DateTime
+  tokenType   String
+  scope       String
+  createdAt   DateTime @default(now())
+}
+

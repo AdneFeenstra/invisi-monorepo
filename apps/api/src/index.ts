@@ -3,6 +3,8 @@ import { PrismaClient } from "@prisma/client"; // ✅ Prisma import
 import cors from "cors";
 import { clerkClient, getAuth } from "@clerk/express";
 import { clerkMiddleware } from "@clerk/express";
+import { requireAuth } from "@clerk/express";
+import axios from "axios";
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -11,11 +13,9 @@ const port = 4000;
 
 const prisma = new PrismaClient(); // ✅ Prisma instance
 
-app.use(cors()); // ✅ CORS middleware to allow cross-origin requests
-
-app.use(express.json()); // ✅ Body parser toevoegen voor POST-requests
-
 app.use(clerkMiddleware());
+app.use(cors()); // ✅ CORS middleware to allow cross-origin requests
+app.use(express.json()); // ✅ Body parser toevoegen voor POST-requests
 
 app.get("/", (_req, res) => {
   res.send("🏠 Welcome to InvisiBilled API");
@@ -258,6 +258,76 @@ app.get("/me", (req, res) => {
     return res.status(401).json({ error: "Unauthorized" });
   }
   res.json({ userId });
+});
+
+app.get("/harvest/connect", requireAuth(), (req, res) => {
+  const clientId = process.env.HARVEST_CLIENT_ID!;
+  const redirectUri = process.env.HARVEST_REDIRECT_URI!;
+  const authUrl = `https://id.getharvest.com/oauth2/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(
+    redirectUri
+  )}&response_type=code&state=xyz`;
+  res.redirect(authUrl);
+});
+
+app.get("/harvest/callback", async (req, res) => {
+  const { code } = req.query;
+  if (!code) return res.status(400).send("Missing code");
+
+  try {
+    const response = await axios.post(
+      "https://id.getharvest.com/api/v2/oauth2/token",
+      {
+        client_id: process.env.HARVEST_CLIENT_ID,
+        client_secret: process.env.HARVEST_CLIENT_SECRET,
+        code,
+        grant_type: "authorization_code",
+        redirect_uri: process.env.HARVEST_REDIRECT_URI,
+      },
+      { headers: { "Content-Type": "application/json" } }
+    );
+
+    const auth = getAuth(req);
+    if (!auth.userId) return res.status(401).json({ error: "Unauthorized" });
+
+    const {
+      access_token,
+      refresh_token,
+      expires_in,
+      token_type,
+      scope: rawScope,
+    } = response.data;
+
+    const scope = typeof rawScope === "string" ? rawScope : "default";
+
+    const expiresAt = new Date(Date.now() + expires_in * 1000);
+
+    console.log("OAuth response", response.data);
+    console.log("Clerk user", auth.userId);
+
+    await prisma.harvestConnection.upsert({
+      where: { userId: auth.userId },
+      create: {
+        userId: auth.userId,
+        accessToken: access_token,
+        refreshToken: refresh_token,
+        expiresAt,
+        tokenType: token_type,
+        scope,
+      },
+      update: {
+        accessToken: access_token,
+        refreshToken: refresh_token,
+        expiresAt,
+        tokenType: token_type,
+        scope,
+      },
+    });
+
+    res.redirect("http://localhost:5173"); // of /dashboard
+  } catch (err: any) {
+    console.error("OAuth callback error", err.response?.data || err.message);
+    res.status(500).json({ error: "Failed to exchange token" });
+  }
 });
 
 app.listen(port, () => {
