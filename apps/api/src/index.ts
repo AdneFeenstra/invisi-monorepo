@@ -1,6 +1,10 @@
 import express from "express";
 import { PrismaClient } from "@prisma/client"; // ✅ Prisma import
 import cors from "cors";
+import { clerkClient, getAuth } from "@clerk/express";
+import { clerkMiddleware } from "@clerk/express";
+import dotenv from "dotenv";
+dotenv.config();
 
 const app = express();
 const port = 4000;
@@ -10,6 +14,8 @@ const prisma = new PrismaClient(); // ✅ Prisma instance
 app.use(cors()); // ✅ CORS middleware to allow cross-origin requests
 
 app.use(express.json()); // ✅ Body parser toevoegen voor POST-requests
+
+app.use(clerkMiddleware());
 
 app.get("/", (_req, res) => {
   res.send("🏠 Welcome to InvisiBilled API");
@@ -244,6 +250,14 @@ app.patch("/time-entries/:id", async (req, res) => {
     console.error("Error updating time entry:", error);
     res.status(500).json({ error: "Interne fout bij bijwerken" });
   }
+});
+
+app.get("/me", (req, res) => {
+  const { userId } = getAuth(req);
+  if (!userId) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  res.json({ userId });
 });
 
 app.listen(port, () => {

@@ -35,3 +35,15 @@ model TimeEntry {
   createdAt   DateTime  @default(now())
 }
 
+model HarvestLog {
+  id          String   @id @default(cuid())
+  externalId  String   @unique
+  user        String
+  project     String
+  task        String
+  notes       String?
+  hours       Float
+  spentDate   DateTime
+  createdAt   DateTime @default(now())
+}
+

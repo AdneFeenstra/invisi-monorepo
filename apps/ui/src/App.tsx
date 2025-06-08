@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import "./App.css";
+import NewInvoiceForm from "./components/NewInvoiceForm";
+import {
+  SignedIn,
+  SignedOut,
+  SignIn,
+  UserButton,
+  useUser,
+} from "@clerk/clerk-react";
 
 type Invoice = {
   id: string;
@@ -13,10 +22,10 @@ type TimeEntry = {
   description: string;
   duration: number;
   date: string;
-  invoiceId?: string | null;
+  invoiceId?: string;
 };
 
-type ReportItem = {
+type ReportEntry = {
   id: string;
   description: string;
   duration: number;
@@ -26,107 +35,112 @@ type ReportItem = {
 };
 
 function App() {
-  const [view, setView] = useState<"invoices" | "entries" | "report">(
-    "invoices"
-  );
+  const { user } = useUser(); // ✅ Gebruik user hier
+  const [tab, setTab] = useState<"invoices" | "entries" | "report">("invoices");
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [entries, setEntries] = useState<TimeEntry[]>([]);
-  const [report, setReport] = useState<ReportItem[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [report, setReport] = useState<ReportEntry[]>([]);
 
-  const fetchData = useCallback(() => {
-    setLoading(true);
-    const endpoint =
-      view === "invoices"
-        ? "invoices"
-        : view === "entries"
-        ? "time-entries"
-        : "unbilled-report";
-
-    fetch(`http://localhost:4000/${endpoint}`)
+  const fetchInvoices = () =>
+    fetch("http://localhost:4000/invoices")
       .then((res) => res.json())
-      .then((data) => {
-        if (view === "invoices") setInvoices(data);
-        else if (view === "entries") setEntries(data);
-        else setReport(data);
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error("Fout bij ophalen:", err);
-        setLoading(false);
-      });
-  }, [view]);
+      .then(setInvoices);
+
+  const fetchEntries = () =>
+    fetch("http://localhost:4000/time-entries")
+      .then((res) => res.json())
+      .then(setEntries);
+
+  const fetchReport = () =>
+    fetch("http://localhost:4000/unbilled-report")
+      .then((res) => res.json())
+      .then(setReport);
 
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    fetchInvoices();
+    fetchEntries();
+    fetchReport();
+  }, []);
 
   return (
-    <div style={{ padding: "2rem", fontFamily: "sans-serif" }}>
-      <h1>InvisiBilled Dashboard</h1>
-      <div style={{ marginBottom: "1rem" }}>
-        <button onClick={() => setView("invoices")}>📄 Facturen</button>{" "}
-        <button onClick={() => setView("entries")}>⏱️ Time Entries</button>{" "}
-        <button onClick={() => setView("report")}>📋 Unbilled Report</button>
-      </div>
+    <div className="App">
+      <SignedOut>
+        <SignIn />
+      </SignedOut>
 
-      {loading && <p>⏳ Laden...</p>}
-
-      {!loading && view === "invoices" && (
-        <div>
-          <h2>📄 Facturen</h2>
-          {invoices.length === 0 ? (
-            <p>Geen facturen gevonden.</p>
-          ) : (
-            <ul>
-              {invoices.map((inv) => (
-                <li key={inv.id}>
-                  {inv.id} - {inv.client} - €{inv.amount} ({inv.status})
-                </li>
-              ))}
-            </ul>
-          )}
+      <SignedIn>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <div>
+            <p>👋 Welkom, {user?.firstName}</p>{" "}
+            {/* ✅ Hier wordt user gebruikt */}
+            <h1>InvisiBilled Dashboard</h1>
+          </div>
+          <UserButton />
         </div>
-      )}
 
-      {!loading && view === "entries" && (
-        <div>
-          <h2>⏱️ Time Entries</h2>
-          {entries.length === 0 ? (
-            <p>Geen time entries beschikbaar.</p>
-          ) : (
-            <ul>
-              {entries.map((e) => (
-                <li key={e.id}>
-                  {e.date} - {e.description} ({e.duration}h)
-                  {e.invoiceId ? ` → Factuur: ${e.invoiceId}` : ""}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
+        <nav>
+          <button onClick={() => setTab("invoices")}>📄 Facturen</button>
+          <button onClick={() => setTab("entries")}>⏱️ Time Entries</button>
+          <button onClick={() => setTab("report")}>📋 Unbilled Report</button>
+        </nav>
 
-      {!loading && view === "report" && (
-        <div>
-          <h2>📋 Unbilled Report</h2>
-          {report.length === 0 ? (
-            <p>Geen onbetaalde werkzaamheden.</p>
-          ) : (
-            <ul>
-              {report.map((r) => (
-                <li key={r.id}>
-                  {r.date} - {r.description} ({r.duration}h)
-                  <br />
-                  💰 {r.suggestedInvoiceAmount}
-                  <br />
-                  💡 {r.recommendation}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
+        {tab === "invoices" && (
+          <>
+            <NewInvoiceForm onCreated={fetchInvoices} />
+            {invoices.length === 0 ? (
+              <p>Geen facturen gevonden.</p>
+            ) : (
+              invoices.map((invoice) => (
+                <div key={invoice.id}>
+                  <strong>{invoice.client}</strong> — €{invoice.amount} (
+                  {invoice.status})
+                </div>
+              ))
+            )}
+          </>
+        )}
+
+        {tab === "entries" && (
+          <>
+            {entries.length === 0 ? (
+              <p>Geen time entries.</p>
+            ) : (
+              entries.map((entry) => (
+                <div key={entry.id}>
+                  {entry.description} — {entry.duration}u op{" "}
+                  {new Date(entry.date).toLocaleDateString()}{" "}
+                  {entry.invoiceId && <em>(Gefactureerd)</em>}
+                </div>
+              ))
+            )}
+          </>
+        )}
+
+        {tab === "report" && (
+          <>
+            {report.length === 0 ? (
+              <p>Geen onbetaalde taken.</p>
+            ) : (
+              report.map((r) => (
+                <div key={r.id}>
+                  <p>
+                    <strong>{r.description}</strong> — {r.duration}u op{" "}
+                    {new Date(r.date).toLocaleDateString()} →{" "}
+                    {r.suggestedInvoiceAmount}
+                  </p>
+                  <em>{r.recommendation}</em>
+                </div>
+              ))
+            )}
+          </>
+        )}
+      </SignedIn>
     </div>
   );
 }
