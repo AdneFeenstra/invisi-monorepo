@@ -7,7 +7,8 @@ import {
   SignIn,
   UserButton,
   useUser,
-} from "@clerk/clerk-react";
+  useAuth,
+} from "@clerk/clerk-react"; // ⬅️ toegevoegde useAuth
 
 type Invoice = {
   id: string;
@@ -35,7 +36,9 @@ type ReportEntry = {
 };
 
 function App() {
-  const { user } = useUser(); // ✅ Gebruik user hier
+  const { user } = useUser();
+  const { getToken } = useAuth(); // ⬅️ toegevoegd
+
   const [tab, setTab] = useState<"invoices" | "entries" | "report">("invoices");
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [entries, setEntries] = useState<TimeEntry[]>([]);
@@ -62,6 +65,26 @@ function App() {
     fetchReport();
   }, []);
 
+  // 🔐 JWT ophalen en /me endpoint aanroepen
+  useEffect(() => {
+    async function checkMe() {
+      try {
+        const token = await getToken({ template: "default" });
+        const res = await fetch("http://localhost:4000/me", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        const data = await res.json();
+        console.log("✅ Me endpoint:", data);
+      } catch (err) {
+        console.error("❌ /me ophalen mislukt:", err);
+      }
+    }
+
+    checkMe();
+  }, [getToken]);
+
   return (
     <div className="App">
       <SignedOut>
@@ -77,8 +100,7 @@ function App() {
           }}
         >
           <div>
-            <p>👋 Welkom, {user?.firstName}</p>{" "}
-            {/* ✅ Hier wordt user gebruikt */}
+            <p>👋 Welkom, {user?.firstName}</p>
             <h1>InvisiBilled Dashboard</h1>
           </div>
           <UserButton />

@@ -1,23 +1,30 @@
 import express from "express";
 import { PrismaClient } from "@prisma/client"; // ✅ Prisma import
 import cors from "cors";
-import { clerkClient, getAuth } from "@clerk/express";
+import { getAuth } from "@clerk/express";
 import { clerkMiddleware } from "@clerk/express";
-import { requireAuth } from "@clerk/express";
+import { requireAuth as clerkExpressRequireAuth } from "@clerk/express";
 import axios from "axios";
 import { AxiosError } from "axios";
 import qs from "qs";
+import cookieParser from "cookie-parser";
+import { verifyToken } from "@clerk/backend";
+import { requireAuth } from "./middleware/requireAuth";
+import { z } from "zod";
 import dotenv from "dotenv";
-dotenv.config();
+dotenv.config({ path: ".env" });
 
 const app = express();
 const port = 4000;
 
 const prisma = new PrismaClient(); // ✅ Prisma instance
 
+app.use(cookieParser());
 app.use(clerkMiddleware());
 app.use(cors()); // ✅ CORS middleware to allow cross-origin requests
 app.use(express.json()); // ✅ Body parser toevoegen voor POST-requests
+
+type TestType = Express.Request["auth"]; // ← moet géén fout geven
 
 app.get("/", (_req, res) => {
   res.send("🏠 Welcome to InvisiBilled API");
@@ -27,7 +34,7 @@ app.get("/health", (_req, res) => {
   res.send("✅ API is healthy");
 });
 
-app.get("/invoices", async (_req, res) => {
+app.get("/invoices", requireAuth, async (_req, res) => {
   try {
     const invoices = await prisma.invoice.findMany();
     res.json(invoices);
@@ -37,7 +44,7 @@ app.get("/invoices", async (_req, res) => {
   }
 });
 
-app.get("/time-entries", async (_req, res) => {
+app.get("/time-entries", requireAuth, async (_req, res) => {
   try {
     const entries = await prisma.timeEntry.findMany({
       include: {
@@ -51,7 +58,7 @@ app.get("/time-entries", async (_req, res) => {
   }
 });
 
-app.get("/unbilled", async (_req, res) => {
+app.get("/unbilled", requireAuth, async (_req, res) => {
   try {
     const unbilledEntries = await prisma.timeEntry.findMany({
       where: {
@@ -69,7 +76,7 @@ app.get("/unbilled", async (_req, res) => {
   }
 });
 
-app.get("/unbilled-report", async (_req, res) => {
+app.get("/unbilled-report", requireAuth, async (_req, res) => {
   try {
     const entries = await prisma.timeEntry.findMany({
       where: {
@@ -100,12 +107,19 @@ app.get("/unbilled-report", async (_req, res) => {
   }
 });
 
-app.post("/invoices", async (req, res) => {
-  const { client, amount, timeEntryIds } = req.body;
+app.post("/invoices", requireAuth, async (req, res) => {
+  const InvoiceSchema = z.object({
+    client: z.string().min(1),
+    amount: z.number().positive(),
+    timeEntryIds: z.array(z.string().min(1)),
+  });
 
-  if (!client || !amount || !Array.isArray(timeEntryIds)) {
-    return res.status(400).json({ error: "Invalid request data" });
+  const parse = InvoiceSchema.safeParse(req.body);
+  if (!parse.success) {
+    return res.status(400).json({ error: parse.error.flatten() });
   }
+
+  const { client, amount, timeEntryIds } = parse.data;
 
   try {
     const newInvoice = await prisma.invoice.create({
@@ -126,7 +140,7 @@ app.post("/invoices", async (req, res) => {
   }
 });
 
-app.patch("/invoices/:id/pay", async (req, res) => {
+app.patch("/invoices/:id/pay", requireAuth, async (req, res) => {
   const { id } = req.params;
 
   try {
@@ -142,7 +156,7 @@ app.patch("/invoices/:id/pay", async (req, res) => {
   }
 });
 
-app.patch("/invoices/:id/unpay", async (req, res) => {
+app.patch("/invoices/:id/unpay", requireAuth, async (req, res) => {
   const { id } = req.params;
 
   try {
@@ -158,7 +172,7 @@ app.patch("/invoices/:id/unpay", async (req, res) => {
   }
 });
 
-app.delete("/invoices/:id", async (req, res) => {
+app.delete("/invoices/:id", requireAuth, async (req, res) => {
   const { id } = req.params;
 
   try {
@@ -180,22 +194,22 @@ app.delete("/invoices/:id", async (req, res) => {
   }
 });
 
-app.post("/time-entries", async (req, res) => {
-  const {
-    description,
-    duration,
-    date,
-    invoiceId,
-  }: {
-    description: string;
-    duration: number;
-    date: string;
-    invoiceId?: string;
-  } = req.body;
+app.post("/time-entries", requireAuth, async (req, res) => {
+  const TimeEntrySchema = z.object({
+    description: z.string().min(1),
+    duration: z.number().positive(),
+    date: z.string().refine((d) => !isNaN(Date.parse(d)), {
+      message: "Invalid date format",
+    }),
+    invoiceId: z.string().optional(),
+  });
 
-  if (!description || !duration || !date) {
-    return res.status(400).json({ error: "Invalid request data" });
+  const parse = TimeEntrySchema.safeParse(req.body);
+  if (!parse.success) {
+    return res.status(400).json({ error: parse.error.flatten() });
   }
+
+  const { description, duration, date, invoiceId } = parse.data;
 
   try {
     const newEntry = await prisma.timeEntry.create({
@@ -214,7 +228,7 @@ app.post("/time-entries", async (req, res) => {
   }
 });
 
-app.delete("/time-entries/:id", async (req, res) => {
+app.delete("/time-entries/:id", requireAuth, async (req, res) => {
   const { id } = req.params;
 
   try {
@@ -229,13 +243,29 @@ app.delete("/time-entries/:id", async (req, res) => {
   }
 });
 
-app.patch("/time-entries/:id", async (req, res) => {
+app.patch("/time-entries/:id", requireAuth, async (req, res) => {
   const { id } = req.params;
-  const { description, duration, date } = req.body;
+  const TimeEntryUpdateSchema = z
+    .object({
+      description: z.string().optional(),
+      duration: z.number().optional(),
+      date: z
+        .string()
+        .refine((d) => !isNaN(Date.parse(d)), {
+          message: "Invalid date format",
+        })
+        .optional(),
+    })
+    .refine((data) => Object.keys(data).length > 0, {
+      message: "Minstens één veld moet worden opgegeven",
+    });
 
-  if (!description && !duration && !date) {
-    return res.status(400).json({ error: "Geen updatevelden opgegeven" });
+  const parse = TimeEntryUpdateSchema.safeParse(req.body);
+  if (!parse.success) {
+    return res.status(400).json({ error: parse.error.flatten() });
   }
+
+  const { description, duration, date } = parse.data;
 
   try {
     const updated = await prisma.timeEntry.update({
@@ -243,7 +273,7 @@ app.patch("/time-entries/:id", async (req, res) => {
       data: {
         ...(description && { description }),
         ...(duration && { duration }),
-        ...(date && { date }),
+        ...(date && { date: new Date(date) }), // ✅ gegarandeerd een Date
       },
     });
 
@@ -254,15 +284,18 @@ app.patch("/time-entries/:id", async (req, res) => {
   }
 });
 
-app.get("/me", (req, res) => {
-  const { userId } = getAuth(req);
-  if (!userId) {
-    return res.status(401).json({ error: "Unauthorized" });
+app.get("/me", requireAuth, async (req, res) => {
+  if (!req.auth) {
+    return res.status(401).json({ error: "No user info available" });
   }
-  res.json({ userId });
+
+  res.json({
+    userId: req.auth.userId,
+    email: req.auth.email,
+  });
 });
 
-app.get("/harvest/connect", requireAuth(), (req, res) => {
+app.get("/harvest/connect", requireAuth, (req, res) => {
   const clientId = process.env.HARVEST_CLIENT_ID!;
   const redirectUri = process.env.HARVEST_REDIRECT_URI!;
   const authUrl = `https://id.getharvest.com/oauth2/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(
@@ -271,7 +304,7 @@ app.get("/harvest/connect", requireAuth(), (req, res) => {
   res.redirect(authUrl);
 });
 
-app.get("/harvest/callback", async (req, res) => {
+app.get("/harvest/callback", requireAuth, async (req, res) => {
   const { code } = req.query;
   if (!code) return res.status(400).send("Missing code");
 
@@ -288,8 +321,7 @@ app.get("/harvest/callback", async (req, res) => {
       { headers: { "Content-Type": "application/json" } }
     );
 
-    const auth = getAuth(req);
-    if (!auth.userId) return res.status(401).json({ error: "Unauthorized" });
+    const userId = req.auth!.userId;
 
     const {
       access_token,
@@ -304,12 +336,12 @@ app.get("/harvest/callback", async (req, res) => {
     const expiresAt = new Date(Date.now() + expires_in * 1000);
 
     console.log("OAuth response", response.data);
-    console.log("Clerk user", auth.userId);
+    console.log("Clerk user", userId);
 
     await prisma.harvestConnection.upsert({
-      where: { userId: auth.userId },
+      where: { userId },
       create: {
-        userId: auth.userId,
+        userId: userId,
         accessToken: access_token,
         refreshToken: refresh_token,
         expiresAt,
@@ -332,12 +364,11 @@ app.get("/harvest/callback", async (req, res) => {
   }
 });
 
-app.get("/harvest/time-entries", requireAuth(), async (req, res) => {
-  const auth = getAuth(req);
-  if (!auth.userId) return res.status(401).json({ error: "Unauthorized" });
+app.get("/harvest/time-entries", requireAuth, async (req, res) => {
+  const userId = req.auth!.userId;
 
   const connection = await prisma.harvestConnection.findUnique({
-    where: { userId: auth.userId },
+    where: { userId },
   });
 
   if (!connection) {
@@ -367,12 +398,11 @@ app.get("/harvest/time-entries", requireAuth(), async (req, res) => {
   }
 });
 
-app.get("/harvest/me", requireAuth(), async (req, res) => {
-  const auth = getAuth(req);
-  if (!auth.userId) return res.status(401).json({ error: "Unauthorized" });
+app.get("/harvest/me", requireAuth, async (req, res) => {
+  const userId = req.auth!.userId;
 
   const connection = await prisma.harvestConnection.findUnique({
-    where: { userId: auth.userId },
+    where: { userId },
   });
 
   if (!connection) {
@@ -396,7 +426,7 @@ app.get("/harvest/me", requireAuth(), async (req, res) => {
   }
 });
 
-app.get("/clickup/connect", requireAuth(), (req, res) => {
+app.get("/clickup/connect", requireAuth, (req, res) => {
   const clientId = process.env.CLICKUP_CLIENT_ID!;
   const redirectUri = process.env.CLICKUP_REDIRECT_URI!;
   const authUrl = `https://app.clickup.com/api?client_id=${clientId}&redirect_uri=${encodeURIComponent(
@@ -405,7 +435,7 @@ app.get("/clickup/connect", requireAuth(), (req, res) => {
   res.redirect(authUrl);
 });
 
-app.get("/clickup/callback", async (req, res) => {
+app.get("/clickup/callback", requireAuth, async (req, res) => {
   const { code } = req.query;
   if (!code) return res.status(400).send("Missing code");
 
@@ -420,8 +450,7 @@ app.get("/clickup/callback", async (req, res) => {
       }
     );
 
-    const auth = getAuth(req);
-    if (!auth.userId) return res.status(401).json({ error: "Unauthorized" });
+    const userId = req.auth!.userId;
 
     const { access_token, token_type } = tokenRes.data;
 
@@ -436,9 +465,9 @@ app.get("/clickup/callback", async (req, res) => {
     const team = workspaceRes.data.teams?.[0];
 
     await prisma.clickUpConnection.upsert({
-      where: { userId: auth.userId },
+      where: { userId: userId },
       create: {
-        userId: auth.userId,
+        userId: userId,
         accessToken: access_token,
         tokenType: token_type,
         workspaceId: team?.id || "",
@@ -460,12 +489,11 @@ app.get("/clickup/callback", async (req, res) => {
   }
 });
 
-app.get("/clickup/tasks", requireAuth(), async (req, res) => {
-  const auth = getAuth(req);
-  if (!auth.userId) return res.status(401).json({ error: "Unauthorized" });
+app.get("/clickup/tasks", requireAuth, async (req, res) => {
+  const userId = req.auth!.userId;
 
   const connection = await prisma.clickUpConnection.findUnique({
-    where: { userId: auth.userId },
+    where: { userId },
   });
 
   if (!connection) {
@@ -493,12 +521,12 @@ app.get("/clickup/tasks", requireAuth(), async (req, res) => {
   }
 });
 
-app.get("/clickup/me", requireAuth(), async (req, res) => {
-  const auth = getAuth(req);
-  if (!auth.userId) return res.status(401).json({ error: "Unauthorized" });
+app.get("/clickup/me", requireAuth, async (req, res) => {
+  console.log("✅ /clickup/me route hit");
+  const userId = req.auth!.userId;
 
   const connection = await prisma.clickUpConnection.findUnique({
-    where: { userId: auth.userId },
+    where: { userId },
   });
 
   if (!connection) {
@@ -524,21 +552,23 @@ app.get("/clickup/me", requireAuth(), async (req, res) => {
 });
 
 // QuickBooks connect endpoint
-app.get("/quickbooks/connect", requireAuth(), (req, res) => {
+app.get("/quickbooks/connect", requireAuth, (req, res) => {
   const baseUrl = "https://appcenter.intuit.com/connect/oauth2";
-  const clientId = process.env.QB_CLIENT_ID!;
-  const redirectUri = process.env.QB_REDIRECT_URI!;
+  const clientId = process.env.QUICKBOOKS_CLIENT_ID!;
+  const redirectUri = process.env.QUICKBOOKS_REDIRECT_URI!;
   const scope = "com.intuit.quickbooks.accounting openid profile email";
 
   const url = `${baseUrl}?client_id=${clientId}&redirect_uri=${encodeURIComponent(
     redirectUri
-  )}&response_type=code&scope=${encodeURIComponent(scope)}`;
+  )}&response_type=code&scope=${encodeURIComponent(scope)}&state=xyz`;
+
+  console.log("🔗 Redirecting to QuickBooks:", url);
 
   res.redirect(url);
 });
 
 // QuickBooks callback
-app.get("/quickbooks/callback", async (req, res) => {
+app.get("/quickbooks/callback", requireAuth, async (req, res) => {
   const { code, realmId } = req.query;
 
   if (!code || !realmId) {
@@ -565,17 +595,14 @@ app.get("/quickbooks/callback", async (req, res) => {
       }
     );
 
-    const auth = getAuth(req);
-    if (!auth.userId) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
+    const userId = req.auth!.userId;
 
     const { access_token, refresh_token, expires_in } = response.data;
 
     await prisma.quickBooksConnection.upsert({
-      where: { userId: auth.userId },
+      where: { userId },
       create: {
-        userId: auth.userId,
+        userId: userId,
         accessToken: access_token,
         refreshToken: refresh_token,
         expiresAt: new Date(Date.now() + expires_in * 1000),
@@ -600,11 +627,11 @@ app.get("/quickbooks/callback", async (req, res) => {
   }
 });
 
-app.get("/quickbooks/customers", requireAuth(), async (req, res) => {
-  const auth = getAuth(req);
-  if (!auth.userId) return res.status(401).json({ error: "Unauthorized" });
+app.get("/quickbooks/customers", requireAuth, async (req, res) => {
+  const userId = req.auth!.userId;
+
   const conn = await prisma.quickBooksConnection.findUnique({
-    where: { userId: auth.userId },
+    where: { userId },
   });
 
   if (!conn)
@@ -635,11 +662,11 @@ app.get("/quickbooks/customers", requireAuth(), async (req, res) => {
   }
 });
 
-app.get("/quickbooks/invoices", requireAuth(), async (req, res) => {
-  const auth = getAuth(req);
-  if (!auth.userId) return res.status(401).json({ error: "Unauthorized" });
+app.get("/quickbooks/invoices", requireAuth, async (req, res) => {
+  const userId = req.auth!.userId;
+
   const conn = await prisma.quickBooksConnection.findUnique({
-    where: { userId: auth.userId },
+    where: { userId },
   });
 
   if (!conn)
@@ -668,6 +695,19 @@ app.get("/quickbooks/invoices", requireAuth(), async (req, res) => {
     );
     res.status(500).json({ error: "Failed to fetch invoices" });
   }
+});
+
+app.get("/test-auth", requireAuth, (req, res) => {
+  res.send({ userId: req.auth!.userId });
+});
+
+// Debug route to check cookies and userId
+app.get("/debug-cookie", (req, res) => {
+  const { userId, sessionId } = getAuth(req);
+  console.log("🧪 Debug userId:", userId);
+  console.log("🔍 Session ID:", sessionId);
+  console.log("🔍 Cookies binnen:", req.cookies);
+  res.json({ userId, sessionId, cookies: req.cookies });
 });
 
 app.listen(port, () => {
