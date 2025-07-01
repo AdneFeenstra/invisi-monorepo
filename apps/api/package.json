@@ -12,7 +12,7 @@
   "license": "ISC",
   "packageManager": "pnpm@10.11.0",
   "dependencies": {
-    "@clerk/backend": "^2.1.0",
+    "@clerk/backend": "^2.3.1",
     "@clerk/clerk-sdk-node": "^5.1.6",
     "@clerk/express": "^1.6.0",
     "@prisma/client": "^6.8.2",

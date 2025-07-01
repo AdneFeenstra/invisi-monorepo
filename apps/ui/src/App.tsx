@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useCallback } from "react";
 import "./App.css";
 import NewInvoiceForm from "./components/NewInvoiceForm";
 import {
@@ -8,7 +9,8 @@ import {
   UserButton,
   useUser,
   useAuth,
-} from "@clerk/clerk-react"; // ⬅️ toegevoegde useAuth
+  SignOutButton,
+} from "@clerk/clerk-react";
 
 type Invoice = {
   id: string;
@@ -37,43 +39,41 @@ type ReportEntry = {
 
 function App() {
   const { user } = useUser();
-  const { getToken } = useAuth(); // ⬅️ toegevoegd
+  const { getToken } = useAuth();
+  console.log("✅ useUser user:", user);
+  console.log("✅ useAuth getToken:", getToken);
 
+  const [token, setToken] = useState<string | null>(null);
+  console.log("🧭 Render → token:", token);
   const [tab, setTab] = useState<"invoices" | "entries" | "report">("invoices");
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [entries, setEntries] = useState<TimeEntry[]>([]);
   const [report, setReport] = useState<ReportEntry[]>([]);
 
-  const fetchInvoices = () =>
-    fetch("http://localhost:4000/invoices")
-      .then((res) => res.json())
-      .then(setInvoices);
-
-  const fetchEntries = () =>
-    fetch("http://localhost:4000/time-entries")
-      .then((res) => res.json())
-      .then(setEntries);
-
-  const fetchReport = () =>
-    fetch("http://localhost:4000/unbilled-report")
-      .then((res) => res.json())
-      .then(setReport);
-
+  // ✅ 1. Haal Clerk-token op en sla het op
   useEffect(() => {
-    fetchInvoices();
-    fetchEntries();
-    fetchReport();
-  }, []);
+    if (!user) {
+      console.warn("⚠️ Geen ingelogde gebruiker, fetchToken niet aangeroepen");
+      return;
+    }
 
-  // 🔐 JWT ophalen en /me endpoint aanroepen
-  useEffect(() => {
-    async function checkMe() {
+    async function fetchToken() {
+      console.log("✅ fetchToken called because user is signed in");
       try {
-        const token = await getToken({ template: "default" });
+        const t = await getToken();
+        console.log("✅ fetched token:", t);
+
+        if (!t) {
+          console.warn("⚠️ getToken() gaf null terug");
+          return;
+        }
+        setToken(t);
+
         const res = await fetch("http://localhost:4000/me", {
           headers: {
-            Authorization: `Bearer ${token}`,
+            Authorization: `Bearer ${t}`,
           },
+          credentials: "include",
         });
         const data = await res.json();
         console.log("✅ Me endpoint:", data);
@@ -82,8 +82,101 @@ function App() {
       }
     }
 
-    checkMe();
-  }, [getToken]);
+    fetchToken();
+  }, [user, getToken]);
+
+  // ✅ 2. API calls die het token meesturen
+  const fetchInvoices = useCallback(() => {
+    if (!token) {
+      console.warn("⚠️ fetchInvoices → geen token beschikbaar");
+      return;
+    }
+
+    console.log("📡 fetchInvoices met token:", token);
+
+    fetch("http://localhost:4000/invoices", {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: "include",
+    })
+      .then((res) => {
+        console.log("✅ /invoices response.status:", res.status);
+        return res.json();
+      })
+      .then((data) => {
+        console.log("✅ /invoices data:", data);
+        if (Array.isArray(data)) setInvoices(data);
+      })
+      .catch((err) => {
+        console.error("❌ /invoices fetch error:", err);
+      });
+  }, [token]);
+
+  const fetchEntries = useCallback(() => {
+    if (!token) {
+      console.warn("⚠️ fetchEntries → geen token beschikbaar");
+      return;
+    }
+
+    console.log("📡 fetchEntries met token:", token);
+
+    fetch("http://localhost:4000/time-entries", {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: "include",
+    })
+      .then((res) => {
+        console.log("✅ /time-entries response.status:", res.status);
+        return res.json();
+      })
+      .then((data) => {
+        console.log("✅ /time-entries data:", data);
+        if (Array.isArray(data)) setEntries(data);
+      })
+      .catch((err) => {
+        console.error("❌ /time-entries fetch error:", err);
+      });
+  }, [token]);
+
+  const fetchReport = useCallback(() => {
+    if (!token) {
+      console.warn("⚠️ fetchReport → geen token beschikbaar");
+      return;
+    }
+
+    console.log("📡 fetchReport met token:", token);
+
+    fetch("http://localhost:4000/unbilled-report", {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: "include",
+    })
+      .then((res) => {
+        console.log("✅ /unbilled-report response.status:", res.status);
+        return res.json();
+      })
+      .then((data) => {
+        console.log("✅ /unbilled-report data:", data);
+        if (Array.isArray(data)) setReport(data);
+      })
+      .catch((err) => {
+        console.error("❌ /unbilled-report fetch error:", err);
+      });
+  }, [token]);
+
+  // ✅ 3. Haal data op zodra token bekend is
+  useEffect(() => {
+    fetchInvoices();
+    fetchEntries();
+    fetchReport();
+  }, [token, fetchInvoices, fetchEntries, fetchReport]);
+
+  useEffect(() => {
+    console.log("📌 Clerk token in state:", token);
+  }, [token]);
 
   return (
     <div className="App">
@@ -104,6 +197,7 @@ function App() {
             <h1>InvisiBilled Dashboard</h1>
           </div>
           <UserButton />
+          <SignOutButton />
         </div>
 
         <nav>
@@ -114,7 +208,7 @@ function App() {
 
         {tab === "invoices" && (
           <>
-            <NewInvoiceForm onCreated={fetchInvoices} />
+            <NewInvoiceForm onCreated={fetchInvoices} token={token} />
             {invoices.length === 0 ? (
               <p>Geen facturen gevonden.</p>
             ) : (

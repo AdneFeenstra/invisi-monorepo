@@ -21,7 +21,13 @@ const prisma = new PrismaClient(); // ✅ Prisma instance
 
 app.use(cookieParser());
 app.use(clerkMiddleware());
-app.use(cors()); // ✅ CORS middleware to allow cross-origin requests
+app.use(
+  cors({
+    origin: "http://localhost:5173",
+    credentials: true,
+  })
+);
+
 app.use(express.json()); // ✅ Body parser toevoegen voor POST-requests
 
 type TestType = Express.Request["auth"]; // ← moet géén fout geven
@@ -87,7 +93,7 @@ app.get("/unbilled-report", requireAuth, async (_req, res) => {
       },
     });
 
-    const report = entries.map((entry) => ({
+    const report = entries.map((entry: any) => ({
       id: entry.id,
       description: entry.description,
       duration: entry.duration,

@@ -17,3 +17,5 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     </ClerkProvider>
   </React.StrictMode>
 );
+
+console.log("✅ Clerk Publishable Key:", clerkPubKey);

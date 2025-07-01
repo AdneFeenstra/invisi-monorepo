@@ -17,8 +17,10 @@ type Invoice = {
 
 export default function NewInvoiceForm({
   onCreated,
+  token,
 }: {
   onCreated: (invoice: Invoice) => void;
+  token: string | null;
 }) {
   const [client, setClient] = useState("");
   const [entries, setEntries] = useState<TimeEntry[]>([]);
@@ -26,10 +28,21 @@ export default function NewInvoiceForm({
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    fetch("http://localhost:4000/unbilled")
+    if (!token) {
+      console.warn("⚠️ Geen token → /unbilled wordt niet opgevraagd");
+      return;
+    }
+
+    fetch("http://localhost:4000/unbilled", {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: "include",
+    })
       .then((res) => res.json())
-      .then(setEntries);
-  }, []);
+      .then(setEntries)
+      .catch((err) => console.error("❌ Fout bij ophalen unbilled:", err));
+  }, [token]);
 
   const toggleEntry = (id: string) => {
     setSelectedIds((prev) =>
@@ -42,24 +55,41 @@ export default function NewInvoiceForm({
     .reduce((sum, e) => sum + e.duration * 150, 0);
 
   const createInvoice = async () => {
-    if (!client || selectedIds.length === 0) return;
+    if (!client || selectedIds.length === 0 || !token) {
+      console.warn("⚠️ Missing client, selectedIds of token");
+      return;
+    }
 
     setLoading(true);
-    const res = await fetch("http://localhost:4000/invoices", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        client,
-        amount: totalAmount,
-        timeEntryIds: selectedIds,
-      }),
-    });
+    try {
+      const res = await fetch("http://localhost:4000/invoices", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          client,
+          amount: totalAmount,
+          timeEntryIds: selectedIds,
+        }),
+      });
 
-    const data = await res.json();
-    onCreated(data);
-    setClient("");
-    setSelectedIds([]);
-    setLoading(false);
+      if (!res.ok) {
+        throw new Error(`Server error: ${res.status}`);
+      }
+
+      const data = await res.json();
+      onCreated(data);
+
+      setClient("");
+      setSelectedIds([]);
+    } catch (err) {
+      console.error("❌ Error creating invoice:", err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -87,7 +117,7 @@ export default function NewInvoiceForm({
         ))}
       </ul>
       <p>Totale waarde: €{totalAmount.toFixed(2)}</p>
-      <button onClick={createInvoice} disabled={loading}>
+      <button onClick={createInvoice} disabled={loading || !token}>
         ➕ Factuur aanmaken
       </button>
     </div>
