@@ -10,6 +10,7 @@ import qs from "qs";
 import cookieParser from "cookie-parser";
 import { verifyToken } from "@clerk/backend";
 import { requireAuth } from "./middleware/requireAuth";
+import { requireRole } from "./middleware/requireRole";
 import { z } from "zod";
 import dotenv from "dotenv";
 dotenv.config({ path: ".env" });
@@ -40,255 +41,311 @@ app.get("/health", (_req, res) => {
   res.send("✅ API is healthy");
 });
 
-app.get("/invoices", requireAuth, async (_req, res) => {
-  try {
-    const invoices = await prisma.invoice.findMany();
-    res.json(invoices);
-  } catch (error) {
-    console.error("Error fetching invoices:", error);
-    res.status(500).json({ error: "Internal Server Error" });
+app.get(
+  "/invoices",
+  requireAuth,
+  requireAuth,
+  requireRole(["admin", "pm", "viewer"]),
+  async (_req, res) => {
+    try {
+      const invoices = await prisma.invoice.findMany();
+      res.json(invoices);
+    } catch (error) {
+      console.error("Error fetching invoices:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
   }
-});
+);
 
-app.get("/time-entries", requireAuth, async (_req, res) => {
-  try {
-    const entries = await prisma.timeEntry.findMany({
-      include: {
-        invoice: true, // ✅ ook factuurinfo ophalen
-      },
-    });
-    res.json(entries);
-  } catch (error) {
-    console.error("Error fetching time entries:", error);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
-});
-
-app.get("/unbilled", requireAuth, async (_req, res) => {
-  try {
-    const unbilledEntries = await prisma.timeEntry.findMany({
-      where: {
-        invoiceId: null, // 👉 alleen entries zonder gekoppelde factuur
-      },
-      orderBy: {
-        date: "desc",
-      },
-    });
-
-    res.json(unbilledEntries);
-  } catch (error) {
-    console.error("Error fetching unbilled entries:", error);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
-});
-
-app.get("/unbilled-report", requireAuth, async (_req, res) => {
-  try {
-    const entries = await prisma.timeEntry.findMany({
-      where: {
-        invoiceId: null,
-      },
-      orderBy: {
-        date: "desc",
-      },
-    });
-
-    const report = entries.map((entry: any) => ({
-      id: entry.id,
-      description: entry.description,
-      duration: entry.duration,
-      date: entry.date,
-      suggestedInvoiceAmount: `${(entry.duration * 150).toFixed(2)} EUR`,
-      recommendation: `⚠️ Deze taak (“${entry.description}”) op ${new Date(
-        entry.date
-      ).toLocaleDateString()} lijkt nog niet gefactureerd. Overweeg om een factuur van ± €${(
-        entry.duration * 150
-      ).toFixed(2)} aan te maken.`,
-    }));
-
-    res.json(report);
-  } catch (error) {
-    console.error("Error generating unbilled report:", error);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
-});
-
-app.post("/invoices", requireAuth, async (req, res) => {
-  const InvoiceSchema = z.object({
-    client: z.string().min(1),
-    amount: z.number().positive(),
-    timeEntryIds: z.array(z.string().min(1)),
-  });
-
-  const parse = InvoiceSchema.safeParse(req.body);
-  if (!parse.success) {
-    return res.status(400).json({ error: parse.error.flatten() });
-  }
-
-  const { client, amount, timeEntryIds } = parse.data;
-
-  try {
-    const newInvoice = await prisma.invoice.create({
-      data: {
-        client,
-        amount,
-        status: "unpaid",
-        timeEntries: {
-          connect: timeEntryIds.map((id: string) => ({ id })),
+app.get(
+  "/time-entries",
+  requireAuth,
+  requireRole(["admin", "pm", "viewer"]),
+  async (_req, res) => {
+    try {
+      const entries = await prisma.timeEntry.findMany({
+        include: {
+          invoice: true, // ✅ ook factuurinfo ophalen
         },
-      },
+      });
+      res.json(entries);
+    } catch (error) {
+      console.error("Error fetching time entries:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  }
+);
+
+app.get(
+  "/unbilled",
+  requireAuth,
+  requireRole(["admin", "pm", "viewer"]),
+  async (_req, res) => {
+    try {
+      const unbilledEntries = await prisma.timeEntry.findMany({
+        where: {
+          invoiceId: null, // 👉 alleen entries zonder gekoppelde factuur
+        },
+        orderBy: {
+          date: "desc",
+        },
+      });
+
+      res.json(unbilledEntries);
+    } catch (error) {
+      console.error("Error fetching unbilled entries:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  }
+);
+
+app.get(
+  "/unbilled-report",
+  requireAuth,
+  requireRole(["admin", "pm", "viewer"]),
+  async (_req, res) => {
+    try {
+      const entries = await prisma.timeEntry.findMany({
+        where: {
+          invoiceId: null,
+        },
+        orderBy: {
+          date: "desc",
+        },
+      });
+
+      const report = entries.map((entry: any) => ({
+        id: entry.id,
+        description: entry.description,
+        duration: entry.duration,
+        date: entry.date,
+        suggestedInvoiceAmount: `${(entry.duration * 150).toFixed(2)} EUR`,
+        recommendation: `⚠️ Deze taak (“${entry.description}”) op ${new Date(
+          entry.date
+        ).toLocaleDateString()} lijkt nog niet gefactureerd. Overweeg om een factuur van ± €${(
+          entry.duration * 150
+        ).toFixed(2)} aan te maken.`,
+      }));
+
+      res.json(report);
+    } catch (error) {
+      console.error("Error generating unbilled report:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  }
+);
+
+app.post(
+  "/invoices",
+  requireAuth,
+  requireRole(["admin", "pm"]),
+  async (req, res) => {
+    const InvoiceSchema = z.object({
+      client: z.string().min(1),
+      amount: z.number().positive(),
+      timeEntryIds: z.array(z.string().min(1)),
     });
 
-    res.status(201).json(newInvoice);
-  } catch (error) {
-    console.error("Error creating invoice:", error);
-    res.status(500).json({ error: "Internal Server Error" });
+    const parse = InvoiceSchema.safeParse(req.body);
+    if (!parse.success) {
+      return res.status(400).json({ error: parse.error.flatten() });
+    }
+
+    const { client, amount, timeEntryIds } = parse.data;
+
+    try {
+      const newInvoice = await prisma.invoice.create({
+        data: {
+          client,
+          amount,
+          status: "unpaid",
+          timeEntries: {
+            connect: timeEntryIds.map((id: string) => ({ id })),
+          },
+        },
+      });
+
+      res.status(201).json(newInvoice);
+    } catch (error) {
+      console.error("Error creating invoice:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
   }
-});
+);
 
-app.patch("/invoices/:id/pay", requireAuth, async (req, res) => {
-  const { id } = req.params;
+app.patch(
+  "/invoices/:id/pay",
+  requireAuth,
+  requireRole(["admin", "pm"]),
+  async (req, res) => {
+    const { id } = req.params;
 
-  try {
-    const updated = await prisma.invoice.update({
-      where: { id },
-      data: { status: "paid" },
+    try {
+      const updated = await prisma.invoice.update({
+        where: { id },
+        data: { status: "paid" },
+      });
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error marking invoice as paid:", error);
+      res.status(500).json({ error: "Could not mark invoice as paid" });
+    }
+  }
+);
+
+app.patch(
+  "/invoices/:id/unpay",
+  requireAuth,
+  requireRole(["admin", "pm"]),
+  async (req, res) => {
+    const { id } = req.params;
+
+    try {
+      const updatedInvoice = await prisma.invoice.update({
+        where: { id },
+        data: { status: "unpaid" },
+      });
+
+      res.json(updatedInvoice);
+    } catch (error) {
+      console.error("Error updating invoice to unpaid:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  }
+);
+
+app.delete(
+  "/invoices/:id",
+  requireAuth,
+  requireRole(["admin"]),
+  async (req, res) => {
+    const { id } = req.params;
+
+    try {
+      // Eerst ontkoppelen we eventuele gekoppelde time entries
+      await prisma.timeEntry.updateMany({
+        where: { invoiceId: id },
+        data: { invoiceId: null },
+      });
+
+      // Vervolgens verwijderen we de factuur zelf
+      await prisma.invoice.delete({
+        where: { id },
+      });
+
+      res.json({ message: `Factuur ${id} is verwijderd.` });
+    } catch (error) {
+      console.error("Error deleting invoice:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  }
+);
+
+app.post(
+  "/time-entries",
+  requireAuth,
+  requireRole(["admin", "pm", "user"]),
+  async (req, res) => {
+    const TimeEntrySchema = z.object({
+      description: z.string().min(1),
+      duration: z.number().positive(),
+      date: z.string().refine((d) => !isNaN(Date.parse(d)), {
+        message: "Invalid date format",
+      }),
+      invoiceId: z.string().optional(),
     });
 
-    res.json(updated);
-  } catch (error) {
-    console.error("Error marking invoice as paid:", error);
-    res.status(500).json({ error: "Could not mark invoice as paid" });
+    const parse = TimeEntrySchema.safeParse(req.body);
+    if (!parse.success) {
+      return res.status(400).json({ error: parse.error.flatten() });
+    }
+
+    const { description, duration, date, invoiceId } = parse.data;
+
+    try {
+      const newEntry = await prisma.timeEntry.create({
+        data: {
+          description,
+          duration,
+          date: new Date(date),
+          invoiceId: invoiceId || null,
+        },
+      });
+
+      res.status(201).json(newEntry);
+    } catch (error) {
+      console.error("Error creating time entry:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
   }
-});
+);
 
-app.patch("/invoices/:id/unpay", requireAuth, async (req, res) => {
-  const { id } = req.params;
+app.delete(
+  "/time-entries/:id",
+  requireAuth,
+  requireRole(["admin", "pm"]),
+  async (req, res) => {
+    const { id } = req.params;
 
-  try {
-    const updatedInvoice = await prisma.invoice.update({
-      where: { id },
-      data: { status: "unpaid" },
-    });
+    try {
+      await prisma.timeEntry.delete({
+        where: { id },
+      });
 
-    res.json(updatedInvoice);
-  } catch (error) {
-    console.error("Error updating invoice to unpaid:", error);
-    res.status(500).json({ error: "Internal Server Error" });
+      res.json({ message: `Time entry ${id} is verwijderd.` });
+    } catch (error) {
+      console.error("Error deleting time entry:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
   }
-});
+);
 
-app.delete("/invoices/:id", requireAuth, async (req, res) => {
-  const { id } = req.params;
+app.patch(
+  "/time-entries/:id",
+  requireAuth,
+  requireRole(["admin", "pm"]),
+  async (req, res) => {
+    const { id } = req.params;
+    const TimeEntryUpdateSchema = z
+      .object({
+        description: z.string().optional(),
+        duration: z.number().optional(),
+        date: z
+          .string()
+          .refine((d) => !isNaN(Date.parse(d)), {
+            message: "Invalid date format",
+          })
+          .optional(),
+      })
+      .refine((data) => Object.keys(data).length > 0, {
+        message: "Minstens één veld moet worden opgegeven",
+      });
 
-  try {
-    // Eerst ontkoppelen we eventuele gekoppelde time entries
-    await prisma.timeEntry.updateMany({
-      where: { invoiceId: id },
-      data: { invoiceId: null },
-    });
+    const parse = TimeEntryUpdateSchema.safeParse(req.body);
+    if (!parse.success) {
+      return res.status(400).json({ error: parse.error.flatten() });
+    }
 
-    // Vervolgens verwijderen we de factuur zelf
-    await prisma.invoice.delete({
-      where: { id },
-    });
+    const { description, duration, date } = parse.data;
 
-    res.json({ message: `Factuur ${id} is verwijderd.` });
-  } catch (error) {
-    console.error("Error deleting invoice:", error);
-    res.status(500).json({ error: "Internal Server Error" });
+    try {
+      const updated = await prisma.timeEntry.update({
+        where: { id },
+        data: {
+          ...(description && { description }),
+          ...(duration && { duration }),
+          ...(date && { date: new Date(date) }), // ✅ gegarandeerd een Date
+        },
+      });
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating time entry:", error);
+      res.status(500).json({ error: "Interne fout bij bijwerken" });
+    }
   }
-});
-
-app.post("/time-entries", requireAuth, async (req, res) => {
-  const TimeEntrySchema = z.object({
-    description: z.string().min(1),
-    duration: z.number().positive(),
-    date: z.string().refine((d) => !isNaN(Date.parse(d)), {
-      message: "Invalid date format",
-    }),
-    invoiceId: z.string().optional(),
-  });
-
-  const parse = TimeEntrySchema.safeParse(req.body);
-  if (!parse.success) {
-    return res.status(400).json({ error: parse.error.flatten() });
-  }
-
-  const { description, duration, date, invoiceId } = parse.data;
-
-  try {
-    const newEntry = await prisma.timeEntry.create({
-      data: {
-        description,
-        duration,
-        date: new Date(date),
-        invoiceId: invoiceId || null,
-      },
-    });
-
-    res.status(201).json(newEntry);
-  } catch (error) {
-    console.error("Error creating time entry:", error);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
-});
-
-app.delete("/time-entries/:id", requireAuth, async (req, res) => {
-  const { id } = req.params;
-
-  try {
-    await prisma.timeEntry.delete({
-      where: { id },
-    });
-
-    res.json({ message: `Time entry ${id} is verwijderd.` });
-  } catch (error) {
-    console.error("Error deleting time entry:", error);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
-});
-
-app.patch("/time-entries/:id", requireAuth, async (req, res) => {
-  const { id } = req.params;
-  const TimeEntryUpdateSchema = z
-    .object({
-      description: z.string().optional(),
-      duration: z.number().optional(),
-      date: z
-        .string()
-        .refine((d) => !isNaN(Date.parse(d)), {
-          message: "Invalid date format",
-        })
-        .optional(),
-    })
-    .refine((data) => Object.keys(data).length > 0, {
-      message: "Minstens één veld moet worden opgegeven",
-    });
-
-  const parse = TimeEntryUpdateSchema.safeParse(req.body);
-  if (!parse.success) {
-    return res.status(400).json({ error: parse.error.flatten() });
-  }
-
-  const { description, duration, date } = parse.data;
-
-  try {
-    const updated = await prisma.timeEntry.update({
-      where: { id },
-      data: {
-        ...(description && { description }),
-        ...(duration && { duration }),
-        ...(date && { date: new Date(date) }), // ✅ gegarandeerd een Date
-      },
-    });
-
-    res.json(updated);
-  } catch (error) {
-    console.error("Error updating time entry:", error);
-    res.status(500).json({ error: "Interne fout bij bijwerken" });
-  }
-});
+);
 
 app.get("/me", requireAuth, async (req, res) => {
   if (!req.auth) {
@@ -714,6 +771,10 @@ app.get("/debug-cookie", (req, res) => {
   console.log("🔍 Session ID:", sessionId);
   console.log("🔍 Cookies binnen:", req.cookies);
   res.json({ userId, sessionId, cookies: req.cookies });
+});
+
+app.get("/debug-auth", requireAuth, (req, res) => {
+  res.json({ auth: req.auth });
 });
 
 app.listen(port, () => {

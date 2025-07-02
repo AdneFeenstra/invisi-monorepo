@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useCallback } from "react";
 import "./App.css";
 import NewInvoiceForm from "./components/NewInvoiceForm";
+import { jwtDecode } from "jwt-decode";
 import {
   SignedIn,
   SignedOut,
@@ -37,6 +38,11 @@ type ReportEntry = {
   recommendation: string;
 };
 
+type DecodedJWT = {
+  role?: string;
+  [key: string]: unknown;
+};
+
 function App() {
   const { user } = useUser();
   const { getToken } = useAuth();
@@ -60,13 +66,19 @@ function App() {
     async function fetchToken() {
       console.log("✅ fetchToken called because user is signed in");
       try {
-        const t = await getToken();
+        const t = await getToken({ template: "withRole" });
         console.log("✅ fetched token:", t);
+        console.log("✅ JWT raw token:", t);
 
         if (!t) {
           console.warn("⚠️ getToken() gaf null terug");
           return;
         }
+
+        const decoded: DecodedJWT = jwtDecode(t);
+        console.log("✅ JWT decoded payload:", decoded);
+        console.log("🧭 Heeft het een role claim?", decoded.role);
+
         setToken(t);
 
         const res = await fetch("http://localhost:4000/me", {
