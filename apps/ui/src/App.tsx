@@ -85,7 +85,6 @@ function App() {
           headers: {
             Authorization: `Bearer ${t}`,
           },
-          credentials: "include",
         });
         const data = await res.json();
         console.log("✅ Me endpoint:", data);
@@ -110,7 +109,6 @@ function App() {
       headers: {
         Authorization: `Bearer ${token}`,
       },
-      credentials: "include",
     })
       .then((res) => {
         console.log("✅ /invoices response.status:", res.status);
@@ -137,7 +135,6 @@ function App() {
       headers: {
         Authorization: `Bearer ${token}`,
       },
-      credentials: "include",
     })
       .then((res) => {
         console.log("✅ /time-entries response.status:", res.status);
@@ -164,7 +161,6 @@ function App() {
       headers: {
         Authorization: `Bearer ${token}`,
       },
-      credentials: "include",
     })
       .then((res) => {
         console.log("✅ /unbilled-report response.status:", res.status);

@@ -42,7 +42,7 @@ export async function requireAuth(
     console.log("👉 RAW payload ontvangen van Clerk:");
     console.log(JSON.stringify(payload, null, 2));
 
-    const role = payload?.publicMetadata?.role || payload?.role;
+    const role = payload?.role;
 
     if (!role) {
       console.warn("❌ No role in token!");

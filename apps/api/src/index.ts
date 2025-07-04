@@ -44,11 +44,14 @@ app.get("/health", (_req, res) => {
 app.get(
   "/invoices",
   requireAuth,
-  requireAuth,
   requireRole(["admin", "pm", "viewer"]),
   async (_req, res) => {
     try {
-      const invoices = await prisma.invoice.findMany();
+      const invoices = await prisma.invoice.findMany({
+        include: {
+          timeEntries: true,
+        },
+      });
       res.json(invoices);
     } catch (error) {
       console.error("Error fetching invoices:", error);
